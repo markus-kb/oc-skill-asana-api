@@ -79,72 +79,39 @@ Those files are generated runtime support files, not part of the intended distri
 
 ## Configuration
 
-The Asana Personal Access Token can be configured in multiple ways. The precedence is:
+The Asana Personal Access Token must be set as the `ASANA_PAT` environment variable before running `opencode`. There is no way to configure it in `opencode.json` — the OpenCode config schema does not support custom keys.
 
-1. **OpenCode config (preferred)** — Set via `opencode.json` using `{file:...}`, `{env:...}`, or direct value
-2. **Environment variable** — Direct `ASANA_PAT` env var as fallback
-3. **Error** — If neither is configured, tools return an unauthorized error
+### Set for the current session
 
-### Option 1: File-based token (most secure, recommended)
-
-Store your token in a file outside the project, then reference it in `opencode.json`:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "asana_pat": "{file:~/.secrets/asana-pat}"
-}
-```
-
-Create the secret file:
-- **macOS/Linux**: `echo "your-token-here" > ~/.secrets/asana-pat`
-- **Windows (PowerShell)**: `Set-Content -Path "$env:USERPROFILE\.secrets\asana-pat" -Value "your-token-here"`
-
-The file path supports:
-- `~` for home directory
-- Absolute paths: `/home/user/.secrets/asana-pat` or `C:\Users\You\.secrets\asana-pat`
-- Relative paths (resolved from the config file location)
-
-### Option 2: Environment variable reference
-
-Reference an existing environment variable in `opencode.json`:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "asana_pat": "{env:ASANA_PAT}"
-}
-```
-
-Then set the environment variable as usual:
-- **macOS/Linux**: `export ASANA_PAT="your-token-here"`
-- **Windows (PowerShell)**: `$env:ASANA_PAT = "your-token-here"`
-- **Windows (System)**: Set via System Properties → Environment Variables
-
-### Option 3: Direct token in opencode.json (convenient, less secure)
-
-For simple setups, embed the token directly in `opencode.json`:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "asana_pat": "your-pat-token-here"
-}
-```
-
-This is convenient for local or test environments, but less secure than Options 1 or 2 because the token is stored in a file within your project (or globally if using `~/.config/opencode/opencode.json`).
-
-**Note**: Do not commit `opencode.json` to version control if it contains your token. Add it to `.gitignore` if using this option.
-
-### Legacy: Direct environment variable
-
-If you prefer not to use `opencode.json`, set `ASANA_PAT` directly:
-
+**macOS / Linux**
 ```bash
-export ASANA_PAT="your-token-here"
+export ASANA_PAT="your-pat-token-here"
+opencode
 ```
 
-The OpenCode config template in `opencode.json` already includes examples. The permission entry allows the skill:
+**Windows (PowerShell)**
+```powershell
+$env:ASANA_PAT = "your-pat-token-here"
+opencode
+```
+
+### Set permanently in your shell profile
+
+**macOS / Linux** — add to `~/.zshrc`, `~/.bashrc`, or equivalent:
+```bash
+export ASANA_PAT="your-pat-token-here"
+```
+
+**Windows (PowerShell profile)** — add to `$PROFILE`:
+```powershell
+$env:ASANA_PAT = "your-pat-token-here"
+```
+
+**Windows (System environment variables)** — set via System Properties → Advanced → Environment Variables.
+
+### opencode.json
+
+The only setting in `opencode.json` is the skill permission, which is already included in the repo:
 
 ```json
 {

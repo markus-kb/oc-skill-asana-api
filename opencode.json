@@ -4,12 +4,5 @@
     "skill": {
       "asana-api": "allow"
     }
-  },
-  "_asana_pat_config_examples": {
-    "_comment": "Configure ASANA_PAT using OpenCode variable substitution. Choose ONE option and rename 'asana_pat':",
-    "option_1_file": "{file:~/.secrets/asana-pat}",
-    "option_2_env": "{env:ASANA_PAT}",
-    "option_3_direct": "your-pat-token-here"
-  },
-  "_instructions": "To use a configuration option, add this line (without underscore prefix) to the root of this JSON:\n  \"asana_pat\": <your-chosen-option-value>\nFor security, prefer Option 1 (file-based). Option 3 (direct) is convenient but less secure."
+  }
 }

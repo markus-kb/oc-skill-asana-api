@@ -19,13 +19,14 @@ export function buildError(
 }
 
 function getPat(): string {
-  // Priority: 1) OpenCode config substitution ({file:...}, {env:...}, or direct value), 2) Direct ASANA_PAT env var
-  // OpenCode resolves {file:...}, {env:...}, and direct values in opencode.json and sets ASANA_PAT env var
+  // ASANA_PAT must be set as an environment variable before running opencode.
+  // OpenCode's config schema (additionalProperties: false) rejects custom keys,
+  // so there is no way to inject this via opencode.json.
   const pat = process.env.ASANA_PAT
   if (!pat) {
     throw buildError(
       "unauthorized",
-      "ASANA_PAT not configured. Set it in opencode.json using {file:...}, {env:...}, or a direct value; or set the ASANA_PAT environment variable directly.",
+      "ASANA_PAT environment variable is not set. Set it before running opencode: export ASANA_PAT=\"your-token\" (macOS/Linux) or $env:ASANA_PAT=\"your-token\" (PowerShell).",
       401,
     )
   }
