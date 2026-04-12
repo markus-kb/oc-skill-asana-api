@@ -5,3 +5,5 @@ node_modules/
 .opencode/package.json
 .opencode/bun.lock
 .opencode/.gitignore
+# opencode.json may contain user-specific config; commit opencode.json.example instead
+opencode.json

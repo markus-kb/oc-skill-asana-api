@@ -17,11 +17,22 @@ import {
   updateTask,
 } from "../.opencode/tools/asana-core.ts"
 
-const workspaceGid = "ASANA_WORKSPACE_GID_PLACEHOLDER"
-const teamGid = "ASANA_TEAM_GID_PLACEHOLDER"
+// GIDs are not secrets but are internal identifiers we prefer not to hard-code in public source.
+// Read from env vars so the repo can be public without exposing workspace/team identity.
+// Returns typed strings; will throw if any var is missing so every test fails fast with a
+// clear message rather than with a cryptic Asana API error.
+function requireEnv(): { workspaceGid: string; teamGid: string } {
+  assert.ok(process.env.ASANA_PAT, "ASANA_PAT must be set to run the automated tests")
+  assert.ok(process.env.ASANA_WORKSPACE_GID, "ASANA_WORKSPACE_GID must be set to run the automated tests")
+  assert.ok(process.env.ASANA_TEAM_GID, "ASANA_TEAM_GID must be set to run the automated tests")
+  return {
+    workspaceGid: process.env.ASANA_WORKSPACE_GID,
+    teamGid: process.env.ASANA_TEAM_GID,
+  }
+}
 
 function requirePat() {
-  assert.ok(process.env.ASANA_PAT, "ASANA_PAT must be set to run the automated tests")
+  requireEnv()
 }
 
 async function asanaRequest(method: string, path: string, body?: Record<string, unknown>) {
@@ -42,6 +53,7 @@ async function asanaRequest(method: string, path: string, body?: Record<string, 
 }
 
 async function createRawProject(name: string) {
+  const { workspaceGid, teamGid } = requireEnv()
   const project = await asanaRequest("POST", "/projects", {
     name,
     workspace: workspaceGid,

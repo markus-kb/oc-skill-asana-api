@@ -38,7 +38,7 @@ Not included:
   skills/
     asana-api/
       SKILL.md
-opencode.json
+opencode.json.example
 README.md
 tests/
   asana_core.test.ts
@@ -157,9 +157,26 @@ Normal usage does not install OpenCode or any npm dependencies locally.
 
 The automated tests use two mechanisms:
 - `node --experimental-default-type=module --experimental-strip-types` for core integration tests
-- `npx --yes opencode-ai@1.3.10` for skill automation tests
+- `npx --yes opencode-ai@<version>` for skill automation tests
 
 That means OpenCode is downloaded only when you explicitly run the skill automation tests.
+
+### Required environment variables
+
+| Variable | Required for | Description |
+|---|---|---|
+| `ASANA_PAT` | all tests | Your Asana Personal Access Token |
+| `ASANA_WORKSPACE_GID` | core + edge case tests | GID of the Asana workspace to create test data in |
+| `ASANA_TEAM_GID` | core + edge case tests | GID of the team within that workspace |
+
+### Optional environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENCODE_VERSION` | `opencode-ai@1.3.10` | npm package spec for the OpenCode CLI used in skill automation tests |
+| `OPENCODE_MODEL` | `openrouter/openai/gpt-5.4` | Model identifier passed to `opencode run` in skill automation tests |
+
+**Finding your GIDs:** In the Asana web UI, open your workspace and navigate to a project. The URL contains the workspace GID. Team GIDs can be found via the Asana API (`GET /teams`) or from the team's URL in Asana.
 
 Run the full automated suite with:
 

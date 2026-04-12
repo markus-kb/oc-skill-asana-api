@@ -6,6 +6,11 @@ if [ -z "${ASANA_PAT:-}" ]; then
   exit 1
 fi
 
+# Allow callers to pin a specific opencode version or model without editing this file.
+# Defaults reflect the version and model used when this test suite was written.
+OPENCODE_VERSION="${OPENCODE_VERSION:-opencode-ai@1.3.10}"
+OPENCODE_MODEL="${OPENCODE_MODEL:-openrouter/openai/gpt-5.4}"
+
 STAMP="skill-$(date +%s)"
 PROJECT_NAME="Asana API Skill Automated ${STAMP}"
 CREATE_OUT="$(mktemp)"
@@ -20,13 +25,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-npx --yes opencode-ai@1.3.10 debug skill > /tmp/opencode-skill-debug.out
+npx --yes "$OPENCODE_VERSION" debug skill > /tmp/opencode-skill-debug.out
 if ! grep -q 'asana-api' /tmp/opencode-skill-debug.out; then
   printf 'Skill discovery failed: asana-api not found\n' >&2
   exit 1
 fi
 
-npx --yes opencode-ai@1.3.10 run --model openrouter/openai/gpt-5.4 --format json "Load the skill named asana-api and use only asana_api_* tools. Create a new project called '${PROJECT_NAME}' with sections Todo, In Progress, Review, Done." > "$CREATE_OUT"
+npx --yes "$OPENCODE_VERSION" run --model "$OPENCODE_MODEL" --format json "Load the skill named asana-api and use only asana_api_* tools. Create a new project called '${PROJECT_NAME}' with sections Todo, In Progress, Review, Done." > "$CREATE_OUT"
 
 node --input-type=module - "$CREATE_OUT" <<'EOF'
 import fs from 'node:fs'
@@ -38,7 +43,7 @@ const tools = events.filter((event) => event.type === 'tool_use').map((event) =>
 assert.deepEqual(tools, ['asana_api_create_project'])
 EOF
 
-npx --yes opencode-ai@1.3.10 run --model openrouter/openai/gpt-5.4 --format json "Load the skill named asana-api and use only asana_api_* tools. Create a task called 'Design homepage' in the ${PROJECT_NAME} project, In Progress section." > "$TASK_OUT"
+npx --yes "$OPENCODE_VERSION" run --model "$OPENCODE_MODEL" --format json "Load the skill named asana-api and use only asana_api_* tools. Create a task called 'Design homepage' in the ${PROJECT_NAME} project, In Progress section." > "$TASK_OUT"
 
 node --input-type=module - "$TASK_OUT" <<'EOF'
 import fs from 'node:fs'
@@ -53,7 +58,7 @@ assert.ok(tools.includes('asana_api_create_task'))
 assert.equal(tools.at(-1), 'asana_api_create_task')
 EOF
 
-npx --yes opencode-ai@1.3.10 run --model openrouter/openai/gpt-5.4 --format json "Load the skill named asana-api and use only asana_api_* tools. Move the 'Design homepage' task in the ${PROJECT_NAME} project to the Done section." > "$MOVE_OUT"
+npx --yes "$OPENCODE_VERSION" run --model "$OPENCODE_MODEL" --format json "Load the skill named asana-api and use only asana_api_* tools. Move the 'Design homepage' task in the ${PROJECT_NAME} project to the Done section." > "$MOVE_OUT"
 
 node --input-type=module - "$MOVE_OUT" <<'EOF'
 import fs from 'node:fs'
@@ -69,7 +74,7 @@ assert.ok(tools.includes('asana_api_move_task_to_section'))
 assert.equal(tools.at(-1), 'asana_api_move_task_to_section')
 EOF
 
-npx --yes opencode-ai@1.3.10 run --model openrouter/openai/gpt-5.4 --format json "Load the skill named asana-api and use only asana_api_* tools. Add a comment to the 'Design homepage' task in the ${PROJECT_NAME} project saying 'Completed the initial mockups'." > "$COMMENT_OUT"
+npx --yes "$OPENCODE_VERSION" run --model "$OPENCODE_MODEL" --format json "Load the skill named asana-api and use only asana_api_* tools. Add a comment to the 'Design homepage' task in the ${PROJECT_NAME} project saying 'Completed the initial mockups'." > "$COMMENT_OUT"
 
 node --input-type=module - "$COMMENT_OUT" <<'EOF'
 import fs from 'node:fs'
@@ -84,7 +89,7 @@ assert.ok(tools.includes('asana_api_add_comment'))
 assert.equal(tools.at(-1), 'asana_api_add_comment')
 EOF
 
-npx --yes opencode-ai@1.3.10 run --model openrouter/openai/gpt-5.4 --format json "Load the skill named asana-api and use only asana_api_* tools. Post a weekly status update to the ${PROJECT_NAME} project titled 'Week 14 Update' saying 'Completed the initial mockups and moved the task to Done.'." > "$STATUS_CREATE_OUT"
+npx --yes "$OPENCODE_VERSION" run --model "$OPENCODE_MODEL" --format json "Load the skill named asana-api and use only asana_api_* tools. Post a weekly status update to the ${PROJECT_NAME} project titled 'Week 14 Update' saying 'Completed the initial mockups and moved the task to Done.'." > "$STATUS_CREATE_OUT"
 
 node --input-type=module - "$STATUS_CREATE_OUT" <<'EOF'
 import fs from 'node:fs'
@@ -98,7 +103,7 @@ assert.ok(tools.includes('asana_api_create_project_status_update'))
 assert.equal(tools.at(-1), 'asana_api_create_project_status_update')
 EOF
 
-npx --yes opencode-ai@1.3.10 run --model openrouter/openai/gpt-5.4 --format json "Load the skill named asana-api and use only asana_api_* tools. What's the latest status update on the ${PROJECT_NAME} project?" > "$STATUS_GET_OUT"
+npx --yes "$OPENCODE_VERSION" run --model "$OPENCODE_MODEL" --format json "Load the skill named asana-api and use only asana_api_* tools. What's the latest status update on the ${PROJECT_NAME} project?" > "$STATUS_GET_OUT"
 
 node --input-type=module - "$STATUS_GET_OUT" <<'EOF'
 import fs from 'node:fs'
