@@ -79,15 +79,57 @@ Those files are generated runtime support files, not part of the intended distri
 
 ## Configuration
 
-Export your Asana token before using the tools or running the tests:
+The Asana Personal Access Token can be configured in multiple ways. The precedence is:
+
+1. **OpenCode config (preferred)** — Set via `opencode.json` using `{file:...}` or `{env:...}` substitution
+2. **Environment variable** — Direct `ASANA_PAT` env var as fallback
+3. **Error** — If neither is configured, tools return an unauthorized error
+
+### Option 1: File-based token (most secure, recommended)
+
+Store your token in a file outside the project, then reference it in `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "asana_pat": "{file:~/.secrets/asana-pat}"
+}
+```
+
+Create the secret file:
+- **macOS/Linux**: `echo "your-token-here" > ~/.secrets/asana-pat`
+- **Windows (PowerShell)**: `Set-Content -Path "$env:USERPROFILE\.secrets\asana-pat" -Value "your-token-here"`
+
+The file path supports:
+- `~` for home directory
+- Absolute paths: `/home/user/.secrets/asana-pat` or `C:\Users\You\.secrets\asana-pat`
+- Relative paths (resolved from the config file location)
+
+### Option 2: Environment variable reference
+
+Reference an existing environment variable in `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "asana_pat": "{env:ASANA_PAT}"
+}
+```
+
+Then set the environment variable as usual:
+- **macOS/Linux**: `export ASANA_PAT="your-token-here"`
+- **Windows (PowerShell)**: `$env:ASANA_PAT = "your-token-here"`
+- **Windows (System)**: Set via System Properties → Environment Variables
+
+### Option 3: Direct environment variable (legacy)
+
+If you prefer not to use `opencode.json`, set `ASANA_PAT` directly:
 
 ```bash
 export ASANA_PAT="your-token-here"
 ```
 
-`ASANA_PAT` is read at runtime and is never written to project files.
-
-The OpenCode config is already included in `opencode.json` and allows the skill:
+The OpenCode config template in `opencode.json` already includes examples. The permission entry allows the skill:
 
 ```json
 {

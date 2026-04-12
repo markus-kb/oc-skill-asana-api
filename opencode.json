@@ -4,5 +4,11 @@
     "skill": {
       "asana-api": "allow"
     }
+  },
+  "_asana_pat_examples": {
+    "_comment": "Configure ASANA_PAT using OpenCode variable substitution. Uncomment ONE option:",
+    "option_1_file": "{file:~/.secrets/asana-pat}",
+    "option_2_env": "{env:ASANA_PAT}",
+    "option_3_direct": "your-token-here (not recommended)"
   }
 }
