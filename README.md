@@ -81,7 +81,7 @@ Those files are generated runtime support files, not part of the intended distri
 
 The Asana Personal Access Token can be configured in multiple ways. The precedence is:
 
-1. **OpenCode config (preferred)** — Set via `opencode.json` using `{file:...}` or `{env:...}` substitution
+1. **OpenCode config (preferred)** — Set via `opencode.json` using `{file:...}`, `{env:...}`, or direct value
 2. **Environment variable** — Direct `ASANA_PAT` env var as fallback
 3. **Error** — If neither is configured, tools return an unauthorized error
 
@@ -121,7 +121,22 @@ Then set the environment variable as usual:
 - **Windows (PowerShell)**: `$env:ASANA_PAT = "your-token-here"`
 - **Windows (System)**: Set via System Properties → Environment Variables
 
-### Option 3: Direct environment variable (legacy)
+### Option 3: Direct token in opencode.json (convenient, less secure)
+
+For simple setups, embed the token directly in `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "asana_pat": "your-pat-token-here"
+}
+```
+
+This is convenient for local or test environments, but less secure than Options 1 or 2 because the token is stored in a file within your project (or globally if using `~/.config/opencode/opencode.json`).
+
+**Note**: Do not commit `opencode.json` to version control if it contains your token. Add it to `.gitignore` if using this option.
+
+### Legacy: Direct environment variable
 
 If you prefer not to use `opencode.json`, set `ASANA_PAT` directly:
 
