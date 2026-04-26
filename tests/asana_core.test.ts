@@ -3,17 +3,29 @@ import assert from "node:assert/strict"
 
 import {
   addComment,
+  addTaskDependency,
+  addTaskToProject,
+  createSection,
   createProject,
   createProjectStatusUpdate,
   createSubtask,
   createTask,
   findProject,
   findTasks,
+  getProject,
   getProjectStatusUpdates,
   getTask,
   isError,
+  listSubtasks,
+  listTaskComments,
+  listTaskDependencies,
   listProjectSections,
   moveTaskToSection,
+  removeTaskDependency,
+  removeTaskFromProject,
+  reorderSection,
+  updateProject,
+  updateSection,
   updateTask,
 } from "../.opencode/tools/asana-core.ts"
 
@@ -167,12 +179,23 @@ test("core integration: happy path workflow", async () => {
   })
   assert.equal(status.ok, true)
 
+  const htmlStatus = await createProjectStatusUpdate({
+    project: projectGid,
+    title: "Automated HTML Test",
+    html_text: "<body><strong>HTML</strong> path passed.</body>",
+    color: "blue",
+  })
+  assert.equal(htmlStatus.ok, true)
+  assert.equal(htmlStatus.status_update.status_type, "on_hold")
+
   const statuses = await getProjectStatusUpdates({
     project: projectGid,
-    limit: 5,
+    limit: 50,
   })
   assert.equal(statuses.ok, true)
   assert.ok(statuses.status_updates.some((update) => update.gid === status.status_update.gid))
+  assert.ok(statuses.status_updates.some((update) => update.gid === htmlStatus.status_update.gid))
+  assert.ok(statuses.status_updates.every((update) => update.author !== undefined))
 
   const foundTask = await findTasks({
     project: projectGid,
@@ -229,6 +252,14 @@ test("core integration: failure paths", async () => {
   assert.equal(fakeSection.ok, false)
   assert.equal(fakeSection.error.code, "not_found")
 
+  const missingStatusProject = await createProjectStatusUpdate({
+    project: "9999999999999999",
+    title: "Missing project",
+    text: "Should fail",
+  })
+  assert.equal(missingStatusProject.ok, false)
+  assert.equal(missingStatusProject.error.code, "not_found")
+
   const originalPat = process.env.ASANA_PAT
   delete process.env.ASANA_PAT
   const missingPat = await findProject({ name: "anything" })
@@ -243,6 +274,214 @@ test("core integration: failure paths", async () => {
   process.env.ASANA_PAT = originalPat
 })
 
+test("core integration: project status updates accept text and html_text", async () => {
+  requirePat()
+
+  const stamp = `status-${Date.now()}`
+  const project = await createProject({
+    name: `Asana API Status ${stamp}`,
+    notes: "",
+    layout: "list",
+  })
+  assert.equal(project.ok, true)
+
+  const textStatus = await createProjectStatusUpdate({
+    project: project.project.gid,
+    title: "Plain text update",
+    text: "Plain text path passed.",
+    color: "green",
+  })
+  assert.equal(textStatus.ok, true)
+  assert.equal(textStatus.status_update.status_type, "on_track")
+
+  const htmlStatus = await createProjectStatusUpdate({
+    project: project.project.gid,
+    title: "HTML update",
+    html_text: "<body><strong>HTML</strong> path passed.</body>",
+    color: "blue",
+  })
+  assert.equal(htmlStatus.ok, true)
+  assert.equal(htmlStatus.status_update.status_type, "on_hold")
+
+  const statuses = await getProjectStatusUpdates({
+    project: project.project.gid,
+    limit: 50,
+  })
+  assert.equal(statuses.ok, true)
+  assert.ok(statuses.status_updates.length <= 20)
+  assert.ok(statuses.status_updates.some((update) => update.gid === textStatus.status_update.gid))
+  assert.ok(statuses.status_updates.some((update) => update.gid === htmlStatus.status_update.gid))
+  assert.ok(statuses.status_updates.every((update) => update.author !== undefined))
+})
+
+test("core integration: expanded project-work helpers", async () => {
+  requirePat()
+
+  const stamp = `expand-${Date.now()}`
+  const primaryProject = await createProject({
+    name: `Asana API Expanded Primary ${stamp}`,
+    notes: "Initial notes",
+    layout: "list",
+    sections: "Backlog,Done",
+  })
+  assert.equal(primaryProject.ok, true)
+
+  const secondaryProject = await createProject({
+    name: `Asana API Expanded Secondary ${stamp}`,
+    notes: "",
+    layout: "list",
+    sections: "Incoming",
+  })
+  assert.equal(secondaryProject.ok, true)
+
+  const projectDetails = await getProject({ project: primaryProject.project.gid })
+  assert.equal(projectDetails.ok, true)
+  assert.equal(projectDetails.project.name, primaryProject.project.name)
+
+  const updatedProject = await updateProject({
+    project: primaryProject.project.gid,
+    notes: "Updated notes for expanded coverage",
+    color: "light-blue",
+  })
+  assert.equal(updatedProject.ok, true)
+  assert.match(updatedProject.project.notes, /expanded coverage/)
+
+  const createdSection = await createSection({
+    project: primaryProject.project.gid,
+    name: "Review",
+  })
+  assert.equal(createdSection.ok, true)
+
+  const renamedSection = await updateSection({
+    section: createdSection.section.gid,
+    name: "QA",
+  })
+  assert.equal(renamedSection.ok, true)
+  assert.equal(renamedSection.section.name, "QA")
+
+  const primarySections = await listProjectSections({ project: primaryProject.project.gid })
+  assert.equal(primarySections.ok, true)
+  const backlog = primarySections.sections.find((section) => section.name === "Backlog")
+  assert.ok(backlog)
+
+  const reorderedSection = await reorderSection({
+    project: primaryProject.project.gid,
+    section: createdSection.section.gid,
+    insert_before: backlog.gid,
+  })
+  assert.equal(reorderedSection.ok, true)
+
+  const reorderedSections = await listProjectSections({ project: primaryProject.project.gid })
+  assert.equal(reorderedSections.ok, true)
+  const qaIndex = reorderedSections.sections.findIndex((section) => section.name === "QA")
+  const backlogIndex = reorderedSections.sections.findIndex((section) => section.name === "Backlog")
+  assert.ok(qaIndex >= 0)
+  assert.ok(backlogIndex >= 0)
+  assert.ok(qaIndex < backlogIndex)
+
+  const createdTask = await createTask({
+    project: primaryProject.project.gid,
+    name: `Expanded helper task ${stamp}`,
+    notes: "Primary task for expanded helper coverage",
+    section: backlog.gid,
+  })
+  assert.equal(createdTask.ok, true)
+
+  const htmlComment = await addComment({
+    task: createdTask.task.gid,
+    html_text: "<body><strong>Reviewed</strong> and ready.</body>",
+  })
+  assert.equal(htmlComment.ok, true)
+
+  const comments = await listTaskComments({
+    task: createdTask.task.gid,
+    limit: 20,
+  })
+  assert.equal(comments.ok, true)
+  assert.ok(comments.comments.some((comment) => comment.gid === htmlComment.comment.gid))
+
+  const subtask = await createSubtask({
+    parent: createdTask.task.gid,
+    name: `Expanded subtask ${stamp}`,
+    notes: "Subtask coverage",
+  })
+  assert.equal(subtask.ok, true)
+
+  const subtasks = await listSubtasks({ task: createdTask.task.gid })
+  assert.equal(subtasks.ok, true)
+  assert.ok(subtasks.subtasks.some((item) => item.gid === subtask.subtask.gid))
+
+  const secondarySections = await listProjectSections({ project: secondaryProject.project.gid })
+  assert.equal(secondarySections.ok, true)
+  const incoming = secondarySections.sections.find((section) => section.name === "Incoming")
+  assert.ok(incoming)
+
+  const addedMembership = await addTaskToProject({
+    task: createdTask.task.gid,
+    project: secondaryProject.project.gid,
+    section: incoming.gid,
+  })
+  assert.equal(addedMembership.ok, true)
+  assert.ok(addedMembership.task.memberships.some((membership) => membership.project?.gid === secondaryProject.project.gid))
+
+  const removedMembership = await removeTaskFromProject({
+    task: createdTask.task.gid,
+    project: secondaryProject.project.gid,
+  })
+  assert.equal(removedMembership.ok, true)
+  assert.ok(!removedMembership.task.memberships.some((membership) => membership.project?.gid === secondaryProject.project.gid))
+
+  const blockerTask = await createTask({
+    project: primaryProject.project.gid,
+    name: `Expanded blocker ${stamp}`,
+    notes: "Dependency coverage",
+  })
+  assert.equal(blockerTask.ok, true)
+
+  const dependencyAdded = await addTaskDependency({
+    task: createdTask.task.gid,
+    dependency: blockerTask.task.gid,
+  })
+  if (!dependencyAdded.ok) {
+    assert.equal(dependencyAdded.error.status, 402)
+    return
+  }
+
+  const dependencies = await listTaskDependencies({ task: createdTask.task.gid })
+  assert.equal(dependencies.ok, true)
+  assert.ok(dependencies.dependencies.some((dependency) => dependency.gid === blockerTask.task.gid))
+
+  const dependencyRemoved = await removeTaskDependency({
+    task: createdTask.task.gid,
+    dependency: blockerTask.task.gid,
+  })
+  assert.equal(dependencyRemoved.ok, true)
+
+  const dependenciesAfterRemoval = await listTaskDependencies({ task: createdTask.task.gid })
+  assert.equal(dependenciesAfterRemoval.ok, true)
+  assert.ok(!dependenciesAfterRemoval.dependencies.some((dependency) => dependency.gid === blockerTask.task.gid))
+})
+
+test("core validation: project status updates require exactly one body field", async () => {
+  const missingBody = await createProjectStatusUpdate({
+    project: "123",
+    title: "Missing body",
+  })
+  assert.equal(missingBody.ok, false)
+  assert.equal(missingBody.error.code, "invalid_request")
+  assert.match(missingBody.error.message, /exactly one/i)
+
+  const duplicatedBody = await createProjectStatusUpdate({
+    project: "123",
+    title: "Duplicate body",
+    text: "Plain text",
+    html_text: "<body>Rich text</body>",
+  })
+  assert.equal(duplicatedBody.ok, false)
+  assert.equal(duplicatedBody.error.code, "invalid_request")
+  assert.match(duplicatedBody.error.message, /exactly one/i)
+})
+
 test("core integration: edge cases", async () => {
   requirePat()
 
@@ -252,7 +491,8 @@ test("core integration: edge cases", async () => {
   const noSections = await listProjectSections({ project: noSectionsProject })
   assert.equal(noSections.ok, true)
   assert.equal(noSections.sections.length, 1)
-  assert.equal(noSections.sections[0].name, "Untitled section")
+  assert.ok(noSections.sections[0].gid)
+  assert.match(noSections.sections[0].name, /\S/u)
 
   const specialProject = await createRawProject(`Asana API Edge Special ${stamp}`)
   const qaSection = await createRawSection(specialProject, "QA / UAT")

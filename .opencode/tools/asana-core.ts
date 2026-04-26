@@ -126,7 +126,7 @@ async function asanaGetAll(
   maxPages = 10,
 ): Promise<any[] | AsanaErrorShape> {
   const allData: any[] = []
-  const requestParams = { ...params, limit: "100" }
+  const requestParams = { limit: "100", ...params }
 
   for (let page = 0; page < maxPages; page++) {
     const res = await asanaGet(path, requestParams)
@@ -143,6 +143,10 @@ let cachedWorkspaceGid: string | null = null
 let cachedTeamGid: string | null = null
 
 async function getWorkspaceGid(): Promise<string> {
+  if (hasText(process.env.ASANA_WORKSPACE_GID)) {
+    cachedWorkspaceGid = process.env.ASANA_WORKSPACE_GID.trim()
+    return cachedWorkspaceGid
+  }
   if (cachedWorkspaceGid) return cachedWorkspaceGid
   const res = await asanaGet("/users/me")
   if (isError(res)) throw res
@@ -155,6 +159,10 @@ async function getWorkspaceGid(): Promise<string> {
 }
 
 async function getDefaultTeamGid(): Promise<string> {
+  if (hasText(process.env.ASANA_TEAM_GID)) {
+    cachedTeamGid = process.env.ASANA_TEAM_GID.trim()
+    return cachedTeamGid
+  }
   if (cachedTeamGid) return cachedTeamGid
   const workspaceGid = await getWorkspaceGid()
   const res = await asanaGet(`/organizations/${workspaceGid}/teams`)
@@ -179,6 +187,32 @@ function formatCaughtError(error: any): AsanaErrorShape {
   if (isError(error)) return error
   const message = error instanceof Error ? error.message : String(error)
   return buildError("client_error", message, 0)
+}
+
+function validateExactlyOneTextBody(text: string | undefined, htmlText: string | undefined, label: string): AsanaErrorShape | null {
+  const hasPlainText = hasText(text)
+  const hasHtmlText = hasText(htmlText)
+  if (hasPlainText === hasHtmlText) {
+    return buildError(
+      "invalid_request",
+      `Provide exactly one of text or html_text for ${label}.`,
+      400,
+    )
+  }
+  return null
+}
+
+function validateExactlyOneAnchor(before: string | undefined, after: string | undefined, label: string): AsanaErrorShape | null {
+  const hasBefore = hasText(before)
+  const hasAfter = hasText(after)
+  if (hasBefore === hasAfter) {
+    return buildError(
+      "invalid_request",
+      `Provide exactly one of insert_before or insert_after for ${label}.`,
+      400,
+    )
+  }
+  return null
 }
 
 type FindProjectResult = { ok: true; projects: Array<{ gid: string; name: string }> }
@@ -219,7 +253,19 @@ type CreateTaskResult = { ok: true; task: { gid: string; name: string; project: 
 type UpdateTaskResult = { ok: true; task: { gid: string; name: string; completed: boolean; assignee: string | null; due_on: string | null } }
 type CreateSubtaskResult = { ok: true; subtask: { gid: string; name: string; parent: { gid: string; name: string | null } } }
 type MoveTaskResult = { ok: true; moved: { task: { gid: string; name: string }; from_section: string; to_section: string } }
-type AddCommentResult = { ok: true; comment: { gid: string; task: { gid: string; name: string | null }; text: string; created_at: string } }
+type AddCommentResult = { ok: true; comment: { gid: string; task: { gid: string; name: string | null }; text: string; html_text: string | null; created_at: string } }
+type ListTaskCommentsResult = { ok: true; task_gid: string; comments: Array<{ gid: string; text: string; html_text: string | null; created_at: string; author: string | null }> }
+type ListSubtasksResult = { ok: true; task_gid: string; subtasks: Array<{ gid: string; name: string; completed: boolean; assignee: string | null; due_on: string | null }> }
+type GetProjectResult = { ok: true; project: { gid: string; name: string; notes: string; default_view: string | null; color: string | null; archived: boolean; owner: string | null; team: string | null; created_at: string | null } }
+type UpdateProjectResult = { ok: true; project: { gid: string; name: string; notes: string; color: string | null; archived: boolean } }
+type CreateSectionResult = { ok: true; section: { gid: string; name: string; project_gid: string } }
+type UpdateSectionResult = { ok: true; section: { gid: string; name: string } }
+type ReorderSectionResult = { ok: true; moved: { project_gid: string; section_gid: string; position: "before" | "after"; anchor_section_gid: string } }
+type TaskMembershipResult = { ok: true; task: { gid: string; name: string; memberships: Array<{ project: { gid: string; name: string } | null; section: { gid: string; name: string } | null }> } }
+type ListProjectCustomFieldsResult = { ok: true; project_gid: string; custom_fields: Array<{ gid: string; name: string; type: string; is_important: boolean; enum_options: Array<{ gid: string; name: string }> | null }> }
+type UpdateTaskCustomFieldsResult = { ok: true; task: { gid: string; name: string; custom_fields: Array<{ name: string; value: string }> } }
+type ListTaskDependenciesResult = { ok: true; task_gid: string; dependencies: Array<{ gid: string; name: string }>; dependents: Array<{ gid: string; name: string }> }
+type TaskDependencyMutationResult = { ok: true; task_gid: string; dependency_gid: string }
 type GetProjectStatusUpdatesResult = { ok: true; project_gid: string; status_updates: Array<{ gid: string; title: string; text: string; status_type: string; created_at: string; author: string | null }> }
 type CreateProjectStatusUpdateResult = { ok: true; status_update: { gid: string; title: string; status_type: string; created_at: string } }
 type CreateProjectResult = { ok: true; project: { gid: string; name: string; url: string }; sections_created: string[] }
@@ -275,6 +321,14 @@ export async function findTasks(args: {
 }): Promise<FindTasksResult | AsanaErrorShape> {
   try {
     const optFields = "name,completed,assignee.name,due_on,memberships.section.name"
+    const filterProjectTasks = (tasks: any[]) => {
+      if (!args.query) return tasks
+      const query = args.query.toLowerCase()
+      return tasks.filter((task: any) => {
+        const haystack = `${task.name ?? ""}\n${task.notes ?? ""}`.toLowerCase()
+        return haystack.includes(query)
+      })
+    }
     let rawTasks: any[]
 
     if (args.query) {
@@ -289,12 +343,16 @@ export async function findTasks(args: {
       const res = await asanaGet(`/workspaces/${wsGid}/tasks/search`, params)
       if (isError(res)) {
         if (res.error.status !== 402) return res
-        const fallback = await asanaGetAll(`/projects/${args.project}/tasks`, { opt_fields: optFields })
+        const fallback = await asanaGetAll(`/projects/${args.project}/tasks`, { opt_fields: `${optFields},notes` })
         if (isError(fallback)) return fallback
-        const query = args.query.toLowerCase()
-        rawTasks = fallback.filter((task: any) => task.name?.toLowerCase().includes(query))
+        rawTasks = filterProjectTasks(fallback)
       } else {
         rawTasks = res.data ?? []
+        if (rawTasks.length === 0) {
+          const fallback = await asanaGetAll(`/projects/${args.project}/tasks`, { opt_fields: `${optFields},notes` })
+          if (isError(fallback)) return fallback
+          rawTasks = filterProjectTasks(fallback)
+        }
       }
     } else if (args.section) {
       const data = await asanaGetAll(`/sections/${args.section}/tasks`, { opt_fields: optFields })
@@ -518,9 +576,16 @@ export async function moveTaskToSection(args: { task: string; section: string })
   }
 }
 
-export async function addComment(args: { task: string; text: string }): Promise<AddCommentResult | AsanaErrorShape> {
+export async function addComment(args: { task: string; text?: string; html_text?: string }): Promise<AddCommentResult | AsanaErrorShape> {
   try {
-    const res = await asanaPost(`/tasks/${args.task}/stories`, { text: args.text })
+    const validationError = validateExactlyOneTextBody(args.text, args.html_text, "a task comment")
+    if (validationError) return validationError
+
+    const body: Record<string, any> = {}
+    if (hasText(args.text)) body.text = args.text.trim()
+    if (hasText(args.html_text)) body.html_text = args.html_text.trim()
+
+    const res = await asanaPost(`/tasks/${args.task}/stories`, body)
     if (isError(res)) return res
     const taskRes = await asanaGet(`/tasks/${args.task}`, { opt_fields: "name" })
     return {
@@ -529,8 +594,339 @@ export async function addComment(args: { task: string; text: string }): Promise<
         gid: res.data.gid,
         task: { gid: args.task, name: taskRes.data?.name ?? null },
         text: res.data.text,
+        html_text: res.data.html_text ?? null,
         created_at: res.data.created_at,
       },
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function listTaskComments(args: { task: string; limit?: number }): Promise<ListTaskCommentsResult | AsanaErrorShape> {
+  try {
+    const limit = Math.min(args.limit ?? 20, 20)
+    const stories = await asanaGetAll(`/tasks/${args.task}/stories`, {
+      opt_fields: "resource_subtype,text,html_text,created_at,created_by.name",
+      limit: String(limit),
+    }, 1)
+    if (isError(stories)) return stories
+    return {
+      ok: true,
+      task_gid: args.task,
+      comments: stories
+        .filter((story: any) => story.resource_subtype === "comment_added")
+        .slice(0, limit)
+        .map((story: any) => ({
+          gid: story.gid,
+          text: story.text ?? "",
+          html_text: story.html_text ?? null,
+          created_at: story.created_at,
+          author: story.created_by?.name ?? null,
+        })),
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function listSubtasks(args: { task: string }): Promise<ListSubtasksResult | AsanaErrorShape> {
+  try {
+    const subtasks = await asanaGetAll(`/tasks/${args.task}/subtasks`, {
+      opt_fields: "name,completed,assignee.name,due_on",
+    })
+    if (isError(subtasks)) return subtasks
+    return {
+      ok: true,
+      task_gid: args.task,
+      subtasks: subtasks.map((task: any) => ({
+        gid: task.gid,
+        name: task.name,
+        completed: task.completed,
+        assignee: task.assignee?.name ?? null,
+        due_on: task.due_on ?? null,
+      })),
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function getProject(args: { project: string }): Promise<GetProjectResult | AsanaErrorShape> {
+  try {
+    const res = await asanaGet(`/projects/${args.project}`, {
+      opt_fields: "name,notes,default_view,color,archived,owner.name,team.name,created_at",
+    })
+    if (isError(res)) return res
+    return {
+      ok: true,
+      project: {
+        gid: res.data.gid,
+        name: res.data.name,
+        notes: res.data.notes ?? "",
+        default_view: res.data.default_view ?? null,
+        color: res.data.color ?? null,
+        archived: Boolean(res.data.archived),
+        owner: res.data.owner?.name ?? null,
+        team: res.data.team?.name ?? null,
+        created_at: res.data.created_at ?? null,
+      },
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function updateProject(args: {
+  project: string
+  name?: string
+  notes?: string
+  color?: string
+  archived?: boolean
+}): Promise<UpdateProjectResult | AsanaErrorShape> {
+  try {
+    const body: Record<string, any> = {}
+    if (args.name !== undefined) body.name = args.name
+    if (args.notes !== undefined) body.notes = args.notes
+    if (args.color !== undefined) body.color = args.color
+    if (args.archived !== undefined) body.archived = args.archived
+
+    if (Object.keys(body).length === 0) {
+      return buildError("invalid_request", "No project fields to update.", 400)
+    }
+
+    const res = await asanaPut(`/projects/${args.project}`, body)
+    if (isError(res)) return res
+    return {
+      ok: true,
+      project: {
+        gid: res.data.gid,
+        name: res.data.name,
+        notes: res.data.notes ?? "",
+        color: res.data.color ?? null,
+        archived: Boolean(res.data.archived),
+      },
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function createSection(args: { project: string; name: string }): Promise<CreateSectionResult | AsanaErrorShape> {
+  try {
+    const res = await asanaPost(`/projects/${args.project}/sections`, { name: args.name })
+    if (isError(res)) return res
+    return {
+      ok: true,
+      section: {
+        gid: res.data.gid,
+        name: res.data.name,
+        project_gid: args.project,
+      },
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function updateSection(args: { section: string; name: string }): Promise<UpdateSectionResult | AsanaErrorShape> {
+  try {
+    const res = await asanaPut(`/sections/${args.section}`, { name: args.name })
+    if (isError(res)) return res
+    return {
+      ok: true,
+      section: {
+        gid: res.data.gid,
+        name: res.data.name,
+      },
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function reorderSection(args: {
+  project: string
+  section: string
+  insert_before?: string
+  insert_after?: string
+}): Promise<ReorderSectionResult | AsanaErrorShape> {
+  try {
+    const validationError = validateExactlyOneAnchor(args.insert_before, args.insert_after, "a section reorder")
+    if (validationError) return validationError
+
+    const body: Record<string, any> = { section: args.section }
+    if (hasText(args.insert_before)) body.before_section = args.insert_before.trim()
+    if (hasText(args.insert_after)) body.after_section = args.insert_after.trim()
+
+    const res = await asanaPost(`/projects/${args.project}/sections/insert`, body)
+    if (isError(res)) return res
+    return {
+      ok: true,
+      moved: {
+        project_gid: args.project,
+        section_gid: args.section,
+        position: hasText(args.insert_before) ? "before" : "after",
+        anchor_section_gid: hasText(args.insert_before) ? args.insert_before.trim() : args.insert_after!.trim(),
+      },
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function addTaskToProject(args: {
+  task: string
+  project: string
+  section?: string
+}): Promise<TaskMembershipResult | AsanaErrorShape> {
+  try {
+    const body: Record<string, any> = { project: args.project }
+    if (hasText(args.section)) body.section = args.section.trim()
+
+    const addRes = await asanaPost(`/tasks/${args.task}/addProject`, body)
+    if (isError(addRes)) return addRes
+
+    const taskRes = await asanaGet(`/tasks/${args.task}`, {
+      opt_fields: "name,memberships.project.gid,memberships.project.name,memberships.section.gid,memberships.section.name",
+    })
+    if (isError(taskRes)) return taskRes
+
+    return {
+      ok: true,
+      task: {
+        gid: taskRes.data.gid,
+        name: taskRes.data.name,
+        memberships: (taskRes.data.memberships ?? []).map((membership: any) => ({
+          project: membership.project ? { gid: membership.project.gid, name: membership.project.name } : null,
+          section: membership.section ? { gid: membership.section.gid, name: membership.section.name } : null,
+        })),
+      },
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function removeTaskFromProject(args: {
+  task: string
+  project: string
+}): Promise<TaskMembershipResult | AsanaErrorShape> {
+  try {
+    const removeRes = await asanaPost(`/tasks/${args.task}/removeProject`, { project: args.project })
+    if (isError(removeRes)) return removeRes
+
+    const taskRes = await asanaGet(`/tasks/${args.task}`, {
+      opt_fields: "name,memberships.project.gid,memberships.project.name,memberships.section.gid,memberships.section.name",
+    })
+    if (isError(taskRes)) return taskRes
+
+    return {
+      ok: true,
+      task: {
+        gid: taskRes.data.gid,
+        name: taskRes.data.name,
+        memberships: (taskRes.data.memberships ?? []).map((membership: any) => ({
+          project: membership.project ? { gid: membership.project.gid, name: membership.project.name } : null,
+          section: membership.section ? { gid: membership.section.gid, name: membership.section.name } : null,
+        })),
+      },
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function listProjectCustomFields(args: { project: string }): Promise<ListProjectCustomFieldsResult | AsanaErrorShape> {
+  try {
+    const settings = await asanaGetAll(`/projects/${args.project}/custom_field_settings`, {
+      opt_fields: "is_important,custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.enum_options.gid,custom_field.enum_options.name",
+    })
+    if (isError(settings)) return settings
+    return {
+      ok: true,
+      project_gid: args.project,
+      custom_fields: settings.map((setting: any) => ({
+        gid: setting.custom_field?.gid,
+        name: setting.custom_field?.name,
+        type: setting.custom_field?.resource_subtype ?? "unknown",
+        is_important: Boolean(setting.is_important),
+        enum_options: setting.custom_field?.enum_options
+          ? setting.custom_field.enum_options.map((option: any) => ({ gid: option.gid, name: option.name }))
+          : null,
+      })),
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function updateTaskCustomFields(args: {
+  task: string
+  custom_fields: Record<string, unknown>
+}): Promise<UpdateTaskCustomFieldsResult | AsanaErrorShape> {
+  try {
+    if (!args.custom_fields || Object.keys(args.custom_fields).length === 0) {
+      return buildError("invalid_request", "No custom field values to update.", 400)
+    }
+
+    const res = await asanaPut(`/tasks/${args.task}`, { custom_fields: args.custom_fields })
+    if (isError(res)) return res
+    const customFields = (res.data.custom_fields ?? [])
+      .filter((customField: any) => customField.display_value != null)
+      .map((customField: any) => ({ name: customField.name, value: customField.display_value }))
+    return {
+      ok: true,
+      task: {
+        gid: res.data.gid,
+        name: res.data.name,
+        custom_fields: customFields,
+      },
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function listTaskDependencies(args: { task: string }): Promise<ListTaskDependenciesResult | AsanaErrorShape> {
+  try {
+    const dependencies = await asanaGetAll(`/tasks/${args.task}/dependencies`, { opt_fields: "name" })
+    if (isError(dependencies)) return dependencies
+    const dependents = await asanaGetAll(`/tasks/${args.task}/dependents`, { opt_fields: "name" })
+    if (isError(dependents)) return dependents
+    return {
+      ok: true,
+      task_gid: args.task,
+      dependencies: dependencies.map((task: any) => ({ gid: task.gid, name: task.name })),
+      dependents: dependents.map((task: any) => ({ gid: task.gid, name: task.name })),
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function addTaskDependency(args: { task: string; dependency: string }): Promise<TaskDependencyMutationResult | AsanaErrorShape> {
+  try {
+    const res = await asanaPost(`/tasks/${args.task}/addDependencies`, { dependencies: [args.dependency] })
+    if (isError(res)) return res
+    return {
+      ok: true,
+      task_gid: args.task,
+      dependency_gid: args.dependency,
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function removeTaskDependency(args: { task: string; dependency: string }): Promise<TaskDependencyMutationResult | AsanaErrorShape> {
+  try {
+    const res = await asanaPost(`/tasks/${args.task}/removeDependencies`, { dependencies: [args.dependency] })
+    if (isError(res)) return res
+    return {
+      ok: true,
+      task_gid: args.task,
+      dependency_gid: args.dependency,
     }
   } catch (error: any) {
     return formatCaughtError(error)
@@ -566,10 +962,21 @@ export async function getProjectStatusUpdates(args: { project: string; limit?: n
 export async function createProjectStatusUpdate(args: {
   project: string
   title: string
-  text: string
+  text?: string
+  html_text?: string
   color?: "green" | "yellow" | "red" | "blue" | "complete"
 }): Promise<CreateProjectStatusUpdateResult | AsanaErrorShape> {
   try {
+    const hasPlainText = hasText(args.text)
+    const hasHtmlText = hasText(args.html_text)
+    if (hasPlainText === hasHtmlText) {
+      return buildError(
+        "invalid_request",
+        "Provide exactly one of text or html_text for a project status update.",
+        400,
+      )
+    }
+
     const colorToStatus: Record<string, string> = {
       green: "on_track",
       yellow: "at_risk",
@@ -577,12 +984,15 @@ export async function createProjectStatusUpdate(args: {
       blue: "on_hold",
       complete: "complete",
     }
-    const res = await asanaPost("/status_updates", {
+    const body: Record<string, any> = {
       parent: args.project,
       title: args.title,
-      text: args.text,
       status_type: colorToStatus[args.color ?? "green"],
-    })
+    }
+    if (hasPlainText) body.text = args.text.trim()
+    if (hasHtmlText) body.html_text = args.html_text.trim()
+
+    const res = await asanaPost("/status_updates", body)
     if (isError(res)) return res
     return {
       ok: true,
