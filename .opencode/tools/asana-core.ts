@@ -7,6 +7,8 @@ export interface AsanaErrorShape {
     code: string
     message: string
     status: number
+    /** Brief, actionable hint for the caller on how to fix the error. Only present for locally-detected validation failures. */
+    suggestion?: string
   }
 }
 
@@ -14,8 +16,11 @@ export function buildError(
   code: string,
   message: string,
   status: number,
+  suggestion?: string,
 ): AsanaErrorShape {
-  return { ok: false, error: { code, message, status } }
+  const error: AsanaErrorShape["error"] = { code, message, status }
+  if (suggestion !== undefined) error.suggestion = suggestion
+  return { ok: false, error }
 }
 
 function getPat(): string {
@@ -197,6 +202,7 @@ function validateExactlyOneTextBody(text: string | undefined, htmlText: string |
       "invalid_request",
       `Provide exactly one of text or html_text for ${label}.`,
       400,
+      "Pass text for plain text or html_text for rich text — never both, never neither.",
     )
   }
   return null
@@ -210,6 +216,7 @@ function validateExactlyOneAnchor(before: string | undefined, after: string | un
       "invalid_request",
       `Provide exactly one of insert_before or insert_after for ${label}.`,
       400,
+      "Pass insert_before with the GID of the section that should come after, or insert_after with the GID that should come before.",
     )
   }
   return null
@@ -272,6 +279,12 @@ type CreateProjectResult = { ok: true; project: { gid: string; name: string; url
 type GetWorkspaceTagsResult = { ok: true; tags: Array<{ gid: string; name: string }> }
 type CreateTagResult = { ok: true; tag: { gid: string; name: string } }
 type TagMutationResult = { ok: true; task_gid: string; tag_gid: string }
+type CreateTaskWithSubtasksResult = {
+  ok: true
+  task: { gid: string; name: string; project: string | null; section: string | null }
+  subtasks_created: Array<{ gid: string; name: string }>
+  subtasks_failed: Array<{ name: string; error: string }>
+}
 
 export async function findProject(args: { name: string }): Promise<FindProjectResult | AsanaErrorShape> {
   try {
@@ -441,8 +454,27 @@ export async function createTask(args: {
   section?: string
   assignee?: string
   due_on?: string
+  due_at?: string
+  start_on?: string
+  start_at?: string
 }): Promise<CreateTaskResult | AsanaErrorShape> {
   try {
+    if (args.due_on && args.due_at) {
+      return buildError(
+        "invalid_request",
+        "due_on and due_at are mutually exclusive.",
+        400,
+        "Use due_on (YYYY-MM-DD) for date-only or due_at (ISO datetime) for a specific time — not both.",
+      )
+    }
+    if (args.start_on && args.start_at) {
+      return buildError(
+        "invalid_request",
+        "start_on and start_at are mutually exclusive.",
+        400,
+        "Use start_on (YYYY-MM-DD) for date-only or start_at (ISO datetime) for a specific time — not both.",
+      )
+    }
     if (args.due_on && !/^\d{4}-\d{2}-\d{2}$/.test(args.due_on)) {
       return buildError("invalid_request", `Invalid due_on format "${args.due_on}". Expected YYYY-MM-DD.`, 400)
     }
@@ -451,6 +483,9 @@ export async function createTask(args: {
     if (args.notes !== undefined) body.notes = args.notes
     if (hasText(args.assignee)) body.assignee = args.assignee
     if (hasText(args.due_on)) body.due_on = args.due_on
+    if (hasText(args.due_at)) body.due_at = args.due_at
+    if (hasText(args.start_on)) body.start_on = args.start_on
+    if (hasText(args.start_at)) body.start_at = args.start_at
     if (args.section) body.memberships = [{ project: args.project, section: args.section }]
 
     const res = await asanaPost("/tasks", body)
@@ -476,9 +511,29 @@ export async function updateTask(args: {
   notes?: string
   assignee?: string
   due_on?: string
+  due_at?: string
+  start_on?: string
+  start_at?: string
   completed?: boolean
 }): Promise<UpdateTaskResult | AsanaErrorShape> {
   try {
+    if (args.due_on && args.due_at) {
+      return buildError(
+        "invalid_request",
+        "due_on and due_at are mutually exclusive.",
+        400,
+        "Use due_on (YYYY-MM-DD) for date-only or due_at (ISO datetime) for a specific time — not both.",
+      )
+    }
+    if (args.start_on && args.start_at) {
+      return buildError(
+        "invalid_request",
+        "start_on and start_at are mutually exclusive.",
+        400,
+        "Use start_on (YYYY-MM-DD) for date-only or start_at (ISO datetime) for a specific time — not both.",
+      )
+    }
+
     const body: Record<string, any> = {}
     if (args.name !== undefined) body.name = args.name
     if (args.notes !== undefined) body.notes = args.notes
@@ -495,6 +550,15 @@ export async function updateTask(args: {
         }
         body.due_on = args.due_on
       }
+    }
+    if (args.due_at !== undefined && args.due_at !== "") {
+      body.due_at = args.due_at === "null" ? null : args.due_at
+    }
+    if (args.start_on !== undefined && args.start_on !== "") {
+      body.start_on = args.start_on === "null" ? null : args.start_on
+    }
+    if (args.start_at !== undefined && args.start_at !== "") {
+      body.start_at = args.start_at === "null" ? null : args.start_at
     }
 
     if (Object.keys(body).length === 0) {
@@ -524,8 +588,27 @@ export async function createSubtask(args: {
   notes?: string
   assignee?: string
   due_on?: string
+  due_at?: string
+  start_on?: string
+  start_at?: string
 }): Promise<CreateSubtaskResult | AsanaErrorShape> {
   try {
+    if (args.due_on && args.due_at) {
+      return buildError(
+        "invalid_request",
+        "due_on and due_at are mutually exclusive.",
+        400,
+        "Use due_on (YYYY-MM-DD) for date-only or due_at (ISO datetime) for a specific time — not both.",
+      )
+    }
+    if (args.start_on && args.start_at) {
+      return buildError(
+        "invalid_request",
+        "start_on and start_at are mutually exclusive.",
+        400,
+        "Use start_on (YYYY-MM-DD) for date-only or start_at (ISO datetime) for a specific time — not both.",
+      )
+    }
     if (args.due_on && !/^\d{4}-\d{2}-\d{2}$/.test(args.due_on)) {
       return buildError("invalid_request", `Invalid due_on format "${args.due_on}". Expected YYYY-MM-DD.`, 400)
     }
@@ -534,6 +617,9 @@ export async function createSubtask(args: {
     if (args.notes !== undefined) body.notes = args.notes
     if (hasText(args.assignee)) body.assignee = args.assignee
     if (hasText(args.due_on)) body.due_on = args.due_on
+    if (hasText(args.due_at)) body.due_at = args.due_at
+    if (hasText(args.start_on)) body.start_on = args.start_on
+    if (hasText(args.start_at)) body.start_at = args.start_at
 
     const res = await asanaPost(`/tasks/${args.parent}/subtasks`, body)
     if (isError(res)) return res
@@ -1134,4 +1220,69 @@ export async function removeTagFromTask(args: { task: string; tag: string }): Pr
   } catch (error: any) {
     return formatCaughtError(error)
   }
+}
+
+type SubtaskInput = {
+  name: string
+  notes?: string
+  assignee?: string
+  due_on?: string
+  due_at?: string
+  start_on?: string
+  start_at?: string
+}
+
+/**
+ * Convenience composite: creates a root task in a project, then creates all
+ * subtasks under it in sequence. Fails fast if the root task cannot be created.
+ * Subtask failures are collected in subtasks_failed rather than aborting the call,
+ * so the caller always knows exactly what was and was not created.
+ */
+export async function createTaskWithSubtasks(args: {
+  project: string
+  name: string
+  notes?: string
+  section?: string
+  assignee?: string
+  due_on?: string
+  due_at?: string
+  start_on?: string
+  start_at?: string
+  subtasks: SubtaskInput[]
+}): Promise<CreateTaskWithSubtasksResult | AsanaErrorShape> {
+  if (!args.subtasks || args.subtasks.length === 0) {
+    return buildError(
+      "invalid_request",
+      "subtasks array must contain at least one item.",
+      400,
+      "Use create_task instead if you do not need subtasks.",
+    )
+  }
+
+  const rootResult = await createTask({
+    project: args.project,
+    name: args.name,
+    notes: args.notes,
+    section: args.section,
+    assignee: args.assignee,
+    due_on: args.due_on,
+    due_at: args.due_at,
+    start_on: args.start_on,
+    start_at: args.start_at,
+  })
+  if (!rootResult.ok) return rootResult
+
+  const subtasks_created: Array<{ gid: string; name: string }> = []
+  const subtasks_failed: Array<{ name: string; error: string }> = []
+
+  for (const sub of args.subtasks) {
+    const subResult = await createSubtask({ parent: rootResult.task.gid, ...sub })
+    if (subResult.ok) {
+      subtasks_created.push({ gid: subResult.subtask.gid, name: subResult.subtask.name })
+    } else {
+      subtasks_failed.push({ name: sub.name, error: subResult.error.message })
+    }
+  }
+
+  return { ok: true, task: rootResult.task, subtasks_created, subtasks_failed }
 }

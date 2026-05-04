@@ -6,7 +6,11 @@ import {
   addTagToTask,
   addTaskDependency,
   addTaskToProject,
+  buildError,
   createTag,
+  createTask,
+  createSubtask,
+  createTaskWithSubtasks,
   getWorkspaceTags,
   listProjectCustomFields,
   listTaskComments,
@@ -14,6 +18,7 @@ import {
   removeTaskDependency,
   removeTaskFromProject,
   reorderSection,
+  updateTask,
   updateTaskCustomFields,
 } from "../.opencode/tools/asana-core.ts"
 
@@ -423,4 +428,228 @@ test("unit: removeTagFromTask propagates API error", async () => {
       assert.equal(result.error.code, "forbidden")
     },
   )
+})
+
+// ---------------------------------------------------------------------------
+// date field unit tests
+// ---------------------------------------------------------------------------
+
+test("unit: createTask accepts due_at (ISO datetime) and forwards it", async () => {
+  await withMockFetch(
+    async () => createJsonResponse(201, {
+      data: { gid: "task-1", name: "T", memberships: [] },
+    }),
+    async (calls) => {
+      const result = await createTask({
+        project: "proj-1",
+        name: "T",
+        due_at: "2026-06-01T09:00:00.000Z",
+      })
+      assert.equal(result.ok, true)
+      assert.equal(calls[0].body?.data?.due_at, "2026-06-01T09:00:00.000Z")
+      assert.equal(calls[0].body?.data?.due_on, undefined)
+    },
+  )
+})
+
+test("unit: createTask rejects both due_on and due_at together", async () => {
+  const result = await createTask({
+    project: "proj-1",
+    name: "T",
+    due_on: "2026-06-01",
+    due_at: "2026-06-01T09:00:00.000Z",
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, "invalid_request")
+  // suggestion must be present and mention the XOR constraint
+  assert.ok(result.error.suggestion, "expected a suggestion")
+  assert.match(result.error.suggestion, /due_on.*due_at|due_at.*due_on/i)
+})
+
+test("unit: createTask accepts start_on and forwards it", async () => {
+  await withMockFetch(
+    async () => createJsonResponse(201, {
+      data: { gid: "task-1", name: "T", memberships: [] },
+    }),
+    async (calls) => {
+      const result = await createTask({
+        project: "proj-1",
+        name: "T",
+        start_on: "2026-05-01",
+        due_on: "2026-06-01",
+      })
+      assert.equal(result.ok, true)
+      assert.equal(calls[0].body?.data?.start_on, "2026-05-01")
+    },
+  )
+})
+
+test("unit: createTask rejects both start_on and start_at together", async () => {
+  const result = await createTask({
+    project: "proj-1",
+    name: "T",
+    start_on: "2026-05-01",
+    start_at: "2026-05-01T08:00:00.000Z",
+    due_on: "2026-06-01",
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, "invalid_request")
+  assert.ok(result.error.suggestion)
+})
+
+test("unit: updateTask accepts due_at and clears it with null", async () => {
+  await withMockFetch(
+    async () => createJsonResponse(200, {
+      data: { gid: "task-1", name: "T", completed: false, assignee: null, due_on: null, due_at: null },
+    }),
+    async (calls) => {
+      const setResult = await updateTask({ task: "task-1", due_at: "2026-06-01T09:00:00.000Z" })
+      assert.equal(setResult.ok, true)
+      assert.equal(calls[0].body?.data?.due_at, "2026-06-01T09:00:00.000Z")
+
+      const clearResult = await updateTask({ task: "task-1", due_at: "null" })
+      assert.equal(clearResult.ok, true)
+      assert.equal(calls[1].body?.data?.due_at, null)
+    },
+  )
+})
+
+test("unit: updateTask rejects both due_on and due_at", async () => {
+  const result = await updateTask({
+    task: "task-1",
+    due_on: "2026-06-01",
+    due_at: "2026-06-01T09:00:00.000Z",
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, "invalid_request")
+  assert.ok(result.error.suggestion)
+})
+
+test("unit: updateTask accepts start_on and start_at independently", async () => {
+  await withMockFetch(
+    async () => createJsonResponse(200, {
+      data: { gid: "task-1", name: "T", completed: false, assignee: null, due_on: null },
+    }),
+    async (calls) => {
+      await updateTask({ task: "task-1", start_on: "2026-05-01", due_on: "2026-06-01" })
+      assert.equal(calls[0].body?.data?.start_on, "2026-05-01")
+
+      await updateTask({ task: "task-1", start_at: "2026-05-01T08:00:00.000Z", due_at: "2026-06-01T08:00:00.000Z" })
+      assert.equal(calls[1].body?.data?.start_at, "2026-05-01T08:00:00.000Z")
+    },
+  )
+})
+
+test("unit: createSubtask accepts start_on and due_at", async () => {
+  await withMockFetch(
+    async (call) => {
+      if (call.url.includes("/subtasks")) {
+        return createJsonResponse(201, { data: { gid: "sub-1", name: "Sub" } })
+      }
+      return createJsonResponse(200, { data: { gid: "task-1", name: "Parent" } })
+    },
+    async (calls) => {
+      const result = await createSubtask({
+        parent: "task-1",
+        name: "Sub",
+        start_on: "2026-05-15",
+        due_at: "2026-06-01T17:00:00.000Z",
+      })
+      assert.equal(result.ok, true)
+      const postCall = calls.find((c) => c.url.includes("/subtasks"))
+      assert.equal(postCall?.body?.data?.start_on, "2026-05-15")
+      assert.equal(postCall?.body?.data?.due_at, "2026-06-01T17:00:00.000Z")
+    },
+  )
+})
+
+// ---------------------------------------------------------------------------
+// createTaskWithSubtasks unit tests
+// ---------------------------------------------------------------------------
+
+test("unit: createTaskWithSubtasks creates root task then subtasks in sequence", async () => {
+  await withMockFetch(
+    async (call) => {
+      if (call.method === "POST" && call.url.endsWith("/tasks")) {
+        return createJsonResponse(201, {
+          data: { gid: "task-new", name: "Root", memberships: [{ project: { name: "P" }, section: { name: "S" } }] },
+        })
+      }
+      if (call.url.includes("/subtasks")) {
+        return createJsonResponse(201, { data: { gid: "sub-new", name: call.body?.data?.name } })
+      }
+      return createJsonResponse(200, { data: { gid: "task-new", name: "Root" } })
+    },
+    async (calls) => {
+      const result = await createTaskWithSubtasks({
+        project: "proj-1",
+        name: "Root",
+        subtasks: [{ name: "Sub A" }, { name: "Sub B" }],
+      })
+      assert.equal(result.ok, true)
+      assert.equal(result.task.gid, "task-new")
+      assert.equal(result.subtasks_created.length, 2)
+      assert.equal(result.subtasks_created[0].name, "Sub A")
+      assert.equal(result.subtasks_created[1].name, "Sub B")
+
+      const rootPost = calls.find((c) => c.method === "POST" && c.url.endsWith("/tasks"))
+      assert.ok(rootPost, "expected POST /tasks for root task")
+      const subtaskPosts = calls.filter((c) => c.url.includes("/subtasks"))
+      assert.equal(subtaskPosts.length, 2)
+    },
+  )
+})
+
+test("unit: createTaskWithSubtasks fails fast if root task creation fails", async () => {
+  await withMockFetch(
+    async () => createJsonResponse(400, { errors: [{ message: "bad request" }] }),
+    async () => {
+      const result = await createTaskWithSubtasks({
+        project: "proj-1",
+        name: "Root",
+        subtasks: [{ name: "Sub A" }],
+      })
+      assert.equal(result.ok, false)
+      assert.equal(result.error.code, "invalid_request")
+    },
+  )
+})
+
+test("unit: createTaskWithSubtasks requires at least one subtask", async () => {
+  const result = await createTaskWithSubtasks({
+    project: "proj-1",
+    name: "Root",
+    subtasks: [],
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, "invalid_request")
+  assert.ok(result.error.suggestion)
+})
+
+// ---------------------------------------------------------------------------
+// suggestion field unit tests
+// ---------------------------------------------------------------------------
+
+test("unit: buildError can carry a suggestion field", () => {
+  const err = buildError("invalid_request", "bad input", 400, "use foo instead of bar")
+  assert.equal(err.ok, false)
+  assert.equal(err.error.suggestion, "use foo instead of bar")
+})
+
+test("unit: buildError suggestion is omitted when not provided", () => {
+  const err = buildError("invalid_request", "bad input", 400)
+  assert.equal(err.ok, false)
+  assert.equal(err.error.suggestion, undefined)
+})
+
+test("unit: validateExactlyOneTextBody error carries suggestion", async () => {
+  const result = await addComment({ task: "task-1" })
+  assert.equal(result.ok, false)
+  assert.ok(result.error.suggestion, "expected a suggestion on missing body error")
+})
+
+test("unit: reorderSection error carries suggestion", async () => {
+  const result = await reorderSection({ project: "proj-1", section: "sec-1" })
+  assert.equal(result.ok, false)
+  assert.ok(result.error.suggestion, "expected a suggestion on missing anchor error")
 })

@@ -52,6 +52,7 @@ You have access to custom Asana tools for managing project work. Use these tools
 | `asana_api_create_tag` | Create a new tag in the workspace (with optional color) |
 | `asana_api_add_tag_to_task` | Attach an existing tag to a task |
 | `asana_api_remove_tag_from_task` | Detach a tag from a task |
+| `asana_api_create_task_with_subtasks` | Create a parent task and one or more subtasks in a single call |
 
 ## Name Resolution Rules
 
@@ -87,6 +88,21 @@ You have access to custom Asana tools for managing project work. Use these tools
 - `asana_api_add_comment` accepts exactly one body field: `text` for plain text or `html_text` for rich text wrapped in `<body>` tags.
 - `asana_api_create_project_status_update` accepts exactly one body field: `text` for plain text or `html_text` for rich text wrapped in `<body>` tags.
 - `asana_api_update_task_custom_fields` expects `custom_fields` as a JSON object string keyed by custom field GIDs.
+
+## Date Fields
+
+`asana_api_create_task`, `asana_api_update_task`, `asana_api_create_subtask`, and `asana_api_create_task_with_subtasks` all accept:
+
+| Field | Format | Notes |
+|-------|--------|-------|
+| `due_on` | `YYYY-MM-DD` | Date-only due date. Mutually exclusive with `due_at`. |
+| `due_at` | ISO 8601 datetime, e.g. `2026-06-01T09:00:00.000Z` | Due date with time. Mutually exclusive with `due_on`. |
+| `start_on` | `YYYY-MM-DD` | Start date. Requires `due_on`. Mutually exclusive with `start_at`. |
+| `start_at` | ISO 8601 datetime | Start date with time. Requires `due_at`. Mutually exclusive with `start_on`. |
+
+Passing both `due_on` and `due_at` (or both `start_on` and `start_at`) returns an `invalid_request` error with a `suggestion` field explaining the fix.
+
+`asana_api_update_task` also accepts `"null"` as the string value for any date field to clear it.
 
 ## Excluded Operations
 
@@ -204,3 +220,12 @@ If the user asks for any of these, explain that they are not supported by this i
 1. `asana_api_get_workspace_tags` with the tag name → tag GID
 2. `asana_api_find_tasks` to locate the task → task GID
 3. `asana_api_remove_tag_from_task` with task GID and tag GID
+
+### Create a task with subtasks in one call
+
+1. `asana_api_find_project` → project GID
+2. `asana_api_list_project_sections` → section GID (optional)
+3. `asana_api_create_task_with_subtasks` with project GID, task name, and `subtasks` as a JSON array string
+   - Example `subtasks`: `'[{"name":"Design mockup","due_on":"2026-06-10"},{"name":"Write copy","assignee":"me"}]'`
+   - Each subtask may include: `name` (required), `notes`, `assignee`, `due_on`, `due_at`, `start_on`, `start_at`
+4. The response includes `subtasks_created` (succeeded) and `subtasks_failed` (with error messages for any that failed)

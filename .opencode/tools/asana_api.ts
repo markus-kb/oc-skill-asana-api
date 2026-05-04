@@ -11,6 +11,7 @@ import {
   createSubtask,
   createTag,
   createTask,
+  createTaskWithSubtasks,
   findProject,
   findTasks,
   getProject,
@@ -139,7 +140,19 @@ export const create_task = tool({
     due_on: tool.schema
       .string()
       .optional()
-      .describe("Due date in YYYY-MM-DD format"),
+      .describe("Due date in YYYY-MM-DD format. Mutually exclusive with due_at."),
+    due_at: tool.schema
+      .string()
+      .optional()
+      .describe("Due date+time as ISO 8601 datetime string (e.g. 2026-06-01T09:00:00.000Z). Mutually exclusive with due_on."),
+    start_on: tool.schema
+      .string()
+      .optional()
+      .describe("Start date in YYYY-MM-DD format. Requires due_on. Mutually exclusive with start_at."),
+    start_at: tool.schema
+      .string()
+      .optional()
+      .describe("Start date+time as ISO 8601 datetime string. Requires due_at. Mutually exclusive with start_on."),
   },
   async execute(args) {
     return toJson(await createTask(args))
@@ -160,7 +173,19 @@ export const update_task = tool({
     due_on: tool.schema
       .string()
       .optional()
-      .describe("New due date (YYYY-MM-DD) or 'null' to clear"),
+      .describe("New due date (YYYY-MM-DD) or 'null' to clear. Mutually exclusive with due_at."),
+    due_at: tool.schema
+      .string()
+      .optional()
+      .describe("New due date+time as ISO 8601 datetime or 'null' to clear. Mutually exclusive with due_on."),
+    start_on: tool.schema
+      .string()
+      .optional()
+      .describe("Start date (YYYY-MM-DD) or 'null' to clear. Requires due_on. Mutually exclusive with start_at."),
+    start_at: tool.schema
+      .string()
+      .optional()
+      .describe("Start date+time as ISO 8601 datetime or 'null' to clear. Requires due_at. Mutually exclusive with start_on."),
     completed: tool.schema
       .boolean()
       .optional()
@@ -201,7 +226,19 @@ export const create_subtask = tool({
     due_on: tool.schema
       .string()
       .optional()
-      .describe("Due date in YYYY-MM-DD format"),
+      .describe("Due date in YYYY-MM-DD format. Mutually exclusive with due_at."),
+    due_at: tool.schema
+      .string()
+      .optional()
+      .describe("Due date+time as ISO 8601 datetime string. Mutually exclusive with due_on."),
+    start_on: tool.schema
+      .string()
+      .optional()
+      .describe("Start date in YYYY-MM-DD format. Requires due_on. Mutually exclusive with start_at."),
+    start_at: tool.schema
+      .string()
+      .optional()
+      .describe("Start date+time as ISO 8601 datetime string. Requires due_at. Mutually exclusive with start_on."),
   },
   async execute(args) {
     return toJson(await createSubtask(args))
@@ -491,5 +528,38 @@ export const remove_tag_from_task = tool({
   },
   async execute(args) {
     return toJson(await removeTagFromTask(args))
+  },
+})
+
+export const create_task_with_subtasks = tool({
+  description:
+    "Create a task in an Asana project and immediately add one or more subtasks under it in a single call. " +
+    "Returns the created parent task and lists which subtasks succeeded or failed. " +
+    "Use this instead of calling create_task + create_subtask separately when you know the subtasks upfront.",
+  args: {
+    project: tool.schema.string().describe("Project GID"),
+    name: tool.schema.string().describe("Parent task name"),
+    notes: tool.schema.string().optional().describe("Parent task description"),
+    section: tool.schema.string().optional().describe("Section GID to place the parent task in"),
+    assignee: tool.schema.string().optional().describe("Assignee for the parent task: 'me', email, or user GID"),
+    due_on: tool.schema.string().optional().describe("Parent task due date (YYYY-MM-DD). Mutually exclusive with due_at."),
+    due_at: tool.schema.string().optional().describe("Parent task due date+time (ISO 8601). Mutually exclusive with due_on."),
+    start_on: tool.schema.string().optional().describe("Parent task start date (YYYY-MM-DD). Requires due_on."),
+    start_at: tool.schema.string().optional().describe("Parent task start date+time (ISO 8601). Requires due_at."),
+    subtasks: tool.schema
+      .string()
+      .describe(
+        'JSON array of subtask objects. Each must have "name" and may include "notes", "assignee", "due_on", "due_at", "start_on", "start_at". ' +
+        'Example: [{"name":"Sub A","due_on":"2026-06-01"},{"name":"Sub B","assignee":"me"}]',
+      ),
+  },
+  async execute(args) {
+    let subtasks: Array<{ name: string; notes?: string; assignee?: string; due_on?: string; due_at?: string; start_on?: string; start_at?: string }>
+    try {
+      subtasks = JSON.parse(args.subtasks)
+    } catch {
+      return toJson({ ok: false, error: { code: "invalid_request", message: "subtasks must be a valid JSON array string.", status: 400, suggestion: 'Pass subtasks as a JSON array string, e.g. \'[{"name":"Sub A"}]\'' } })
+    }
+    return toJson(await createTaskWithSubtasks({ ...args, subtasks }))
   },
 })
