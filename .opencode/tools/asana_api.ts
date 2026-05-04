@@ -2,24 +2,28 @@ import { tool } from "@opencode-ai/plugin/tool"
 
 import {
   addComment,
+  addTagToTask,
   addTaskDependency,
   addTaskToProject,
   createSection,
   createProject,
   createProjectStatusUpdate,
   createSubtask,
+  createTag,
   createTask,
   findProject,
   findTasks,
   getProject,
   getProjectStatusUpdates,
   getTask,
+  getWorkspaceTags,
   listProjectCustomFields,
   listProjectSections,
   listSubtasks,
   listTaskComments,
   listTaskDependencies,
   moveTaskToSection,
+  removeTagFromTask,
   removeTaskDependency,
   removeTaskFromProject,
   reorderSection,
@@ -430,5 +434,62 @@ export const update_project = tool({
   },
   async execute(args) {
     return toJson(await updateProject(args))
+  },
+})
+
+// ---------------------------------------------------------------------------
+// Tag tools
+// ---------------------------------------------------------------------------
+
+export const get_workspace_tags = tool({
+  description:
+    "Search for Asana tags in the workspace by name, or list all tags when no query is given. Use this to find an existing tag's GID before attaching it to a task, so you avoid creating duplicate tags.",
+  args: {
+    query: tool.schema
+      .string()
+      .optional()
+      .describe("Partial tag name to search for. Omit to list all tags."),
+  },
+  async execute(args) {
+    return toJson(await getWorkspaceTags(args))
+  },
+})
+
+export const create_tag = tool({
+  description:
+    "Create a new tag in the Asana workspace. Always call get_workspace_tags first to avoid creating a duplicate. Returns the new tag's GID, which you then pass to add_tag_to_task.",
+  args: {
+    name: tool.schema.string().describe("Tag name"),
+    color: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "Optional Asana color token for the tag, e.g. 'dark-red', 'dark-green', 'dark-blue', 'dark-teal', 'dark-purple', 'dark-orange', 'light-red', 'light-green', 'light-blue'.",
+      ),
+  },
+  async execute(args) {
+    return toJson(await createTag(args))
+  },
+})
+
+export const add_tag_to_task = tool({
+  description: "Attach an existing Asana tag to a task. Use get_workspace_tags or create_tag to obtain the tag GID first.",
+  args: {
+    task: tool.schema.string().describe("Task GID"),
+    tag: tool.schema.string().describe("Tag GID to attach"),
+  },
+  async execute(args) {
+    return toJson(await addTagToTask(args))
+  },
+})
+
+export const remove_tag_from_task = tool({
+  description: "Detach an Asana tag from a task.",
+  args: {
+    task: tool.schema.string().describe("Task GID"),
+    tag: tool.schema.string().describe("Tag GID to detach"),
+  },
+  async execute(args) {
+    return toJson(await removeTagFromTask(args))
   },
 })

@@ -3,10 +3,14 @@ import assert from "node:assert/strict"
 
 import {
   addComment,
+  addTagToTask,
   addTaskDependency,
   addTaskToProject,
+  createTag,
+  getWorkspaceTags,
   listProjectCustomFields,
   listTaskComments,
+  removeTagFromTask,
   removeTaskDependency,
   removeTaskFromProject,
   reorderSection,
@@ -258,6 +262,165 @@ test("unit: listProjectCustomFields maps enum options and updateTaskCustomFields
       assert.deepEqual(calls[1].body, {
         data: { custom_fields: { "field-1": "enum-1" } },
       })
+    },
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Tag unit tests
+// ---------------------------------------------------------------------------
+
+test("unit: getWorkspaceTags resolves workspace and forwards optional query param", async () => {
+  await withMockFetch(
+    async (call) => {
+      // First call: resolve workspace GID via /users/me
+      if (call.url.endsWith("/users/me")) {
+        return createJsonResponse(200, {
+          data: { workspaces: [{ gid: "ws-1" }] },
+        })
+      }
+      // Second call: typeahead for tags (used when query is present)
+      return createJsonResponse(200, {
+        data: [
+          { gid: "tag-1", name: "urgent" },
+          { gid: "tag-2", name: "blocked" },
+        ],
+      })
+    },
+    async (calls) => {
+      const result = await getWorkspaceTags({ query: "urg" })
+      assert.equal(result.ok, true)
+      assert.equal(result.tags.length, 2)
+      assert.equal(result.tags[0].gid, "tag-1")
+      assert.equal(result.tags[0].name, "urgent")
+      // When a query is given, implementation uses the typeahead endpoint
+      const typeaheadCall = calls.find((c) => c.url.includes("/typeahead"))
+      assert.ok(typeaheadCall, "expected a GET to typeahead endpoint")
+      assert.ok(
+        typeaheadCall.url.includes("ws-1"),
+        "expected workspace GID in typeahead URL",
+      )
+      assert.ok(
+        typeaheadCall.url.includes("resource_type=tag"),
+        "expected resource_type=tag in typeahead URL",
+      )
+      assert.ok(
+        typeaheadCall.url.includes("query=urg"),
+        "expected query param forwarded in typeahead URL",
+      )
+    },
+  )
+})
+
+test("unit: getWorkspaceTags with no query returns all tags", async () => {
+  await withMockFetch(
+    async (call) => {
+      if (call.url.endsWith("/users/me")) {
+        return createJsonResponse(200, { data: { workspaces: [{ gid: "ws-1" }] } })
+      }
+      return createJsonResponse(200, { data: [{ gid: "tag-3", name: "review" }] })
+    },
+    async () => {
+      const result = await getWorkspaceTags({})
+      assert.equal(result.ok, true)
+      assert.equal(result.tags[0].name, "review")
+    },
+  )
+})
+
+test("unit: createTag posts to /tags with workspace GID and returns tag", async () => {
+  await withMockFetch(
+    async (call) => {
+      if (call.url.endsWith("/users/me")) {
+        return createJsonResponse(200, { data: { workspaces: [{ gid: "ws-1" }] } })
+      }
+      return createJsonResponse(201, { data: { gid: "tag-99", name: "new-tag" } })
+    },
+    async (calls) => {
+      const result = await createTag({ name: "new-tag" })
+      assert.equal(result.ok, true)
+      assert.equal(result.tag.gid, "tag-99")
+      assert.equal(result.tag.name, "new-tag")
+
+      const postCall = calls.find((c) => c.method === "POST" && c.url.endsWith("/tags"))
+      assert.ok(postCall, "expected POST /tags")
+      assert.deepEqual(postCall.body, { data: { name: "new-tag", workspace: "ws-1" } })
+    },
+  )
+})
+
+test("unit: createTag includes color when provided", async () => {
+  await withMockFetch(
+    async (call) => {
+      if (call.url.endsWith("/users/me")) {
+        return createJsonResponse(200, { data: { workspaces: [{ gid: "ws-1" }] } })
+      }
+      return createJsonResponse(201, { data: { gid: "tag-88", name: "hot" } })
+    },
+    async (calls) => {
+      const result = await createTag({ name: "hot", color: "dark-red" })
+      assert.equal(result.ok, true)
+      const postCall = calls.find((c) => c.method === "POST" && c.url.endsWith("/tags"))
+      assert.ok(postCall)
+      assert.deepEqual(postCall.body, {
+        data: { name: "hot", workspace: "ws-1", color: "dark-red" },
+      })
+    },
+  )
+})
+
+test("unit: addTagToTask posts to /tasks/{gid}/addTag with tag GID in body", async () => {
+  await withMockFetch(
+    async () => createJsonResponse(200, { data: {} }),
+    async (calls) => {
+      const result = await addTagToTask({ task: "task-1", tag: "tag-99" })
+      assert.equal(result.ok, true)
+      assert.equal(result.task_gid, "task-1")
+      assert.equal(result.tag_gid, "tag-99")
+
+      assert.equal(calls.length, 1)
+      assert.ok(calls[0].url.endsWith("/tasks/task-1/addTag"))
+      assert.equal(calls[0].method, "POST")
+      assert.deepEqual(calls[0].body, { data: { tag: "tag-99" } })
+    },
+  )
+})
+
+test("unit: addTagToTask propagates API error", async () => {
+  await withMockFetch(
+    async () => createJsonResponse(404, { errors: [{ message: "task not found" }] }),
+    async () => {
+      const result = await addTagToTask({ task: "bad-task", tag: "tag-1" })
+      assert.equal(result.ok, false)
+      assert.equal(result.error.code, "not_found")
+    },
+  )
+})
+
+test("unit: removeTagFromTask posts to /tasks/{gid}/removeTag with tag GID in body", async () => {
+  await withMockFetch(
+    async () => createJsonResponse(200, { data: {} }),
+    async (calls) => {
+      const result = await removeTagFromTask({ task: "task-1", tag: "tag-99" })
+      assert.equal(result.ok, true)
+      assert.equal(result.task_gid, "task-1")
+      assert.equal(result.tag_gid, "tag-99")
+
+      assert.equal(calls.length, 1)
+      assert.ok(calls[0].url.endsWith("/tasks/task-1/removeTag"))
+      assert.equal(calls[0].method, "POST")
+      assert.deepEqual(calls[0].body, { data: { tag: "tag-99" } })
+    },
+  )
+})
+
+test("unit: removeTagFromTask propagates API error", async () => {
+  await withMockFetch(
+    async () => createJsonResponse(403, { errors: [{ message: "forbidden" }] }),
+    async () => {
+      const result = await removeTagFromTask({ task: "task-1", tag: "tag-1" })
+      assert.equal(result.ok, false)
+      assert.equal(result.error.code, "forbidden")
     },
   )
 })

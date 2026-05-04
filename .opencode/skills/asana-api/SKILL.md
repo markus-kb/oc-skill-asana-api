@@ -1,6 +1,6 @@
 ---
 name: asana-api
-description: Manage Asana project work through custom tools for tasks, subtasks, sections, comments, status updates, and project creation
+description: Manage Asana project work through custom tools for tasks, subtasks, sections, comments, status updates, project creation, and tags
 compatibility: opencode
 metadata:
   scope: project-work
@@ -48,12 +48,17 @@ You have access to custom Asana tools for managing project work. Use these tools
 | `asana_api_update_section` | Rename a section |
 | `asana_api_reorder_section` | Move a section before or after another section |
 | `asana_api_list_project_custom_fields` | List custom fields configured on a project |
+| `asana_api_get_workspace_tags` | Search for tags by name or list all workspace tags |
+| `asana_api_create_tag` | Create a new tag in the workspace (with optional color) |
+| `asana_api_add_tag_to_task` | Attach an existing tag to a task |
+| `asana_api_remove_tag_from_task` | Detach a tag from a task |
 
 ## Name Resolution Rules
 
 - **Always resolve names to GIDs before writes.** If the user says "Marketing Launch project", call `asana_api_find_project` first to get the GID.
 - **Always resolve section names to GIDs.** If the user says "move to In Progress", call `asana_api_list_project_sections` first to find the section GID.
 - **Always resolve task names to GIDs.** If the user references a task by name, call `asana_api_find_tasks` to locate it.
+- **Always resolve tag names to GIDs before attaching or detaching.** Call `asana_api_get_workspace_tags` first. If the tag does not exist, call `asana_api_create_tag` to create it, then use the returned GID.
 
 ## Preferred Lookup Order
 
@@ -186,3 +191,16 @@ If the user asks for any of these, explain that they are not supported by this i
 ### Create a new project with sections
 
 1. `asana_api_create_project` with name, optional notes, layout, and comma-separated section names
+
+### Tag a task
+
+1. `asana_api_get_workspace_tags` with a query matching the tag name → check if tag already exists
+2. If found: use its GID. If not: `asana_api_create_tag` with name and optional color → get tag GID
+3. `asana_api_find_tasks` to locate the task → task GID
+4. `asana_api_add_tag_to_task` with task GID and tag GID
+
+### Remove a tag from a task
+
+1. `asana_api_get_workspace_tags` with the tag name → tag GID
+2. `asana_api_find_tasks` to locate the task → task GID
+3. `asana_api_remove_tag_from_task` with task GID and tag GID
