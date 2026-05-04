@@ -3,24 +3,28 @@ import assert from "node:assert/strict"
 
 import {
   addComment,
+  addTagToTask,
   addTaskDependency,
   addTaskToProject,
   createSection,
   createProject,
   createProjectStatusUpdate,
   createSubtask,
+  createTag,
   createTask,
   findProject,
   findTasks,
   getProject,
   getProjectStatusUpdates,
   getTask,
+  getWorkspaceTags,
   isError,
   listSubtasks,
   listTaskComments,
   listTaskDependencies,
   listProjectSections,
   moveTaskToSection,
+  removeTagFromTask,
   removeTaskDependency,
   removeTaskFromProject,
   reorderSection,
@@ -564,4 +568,97 @@ test("core integration: edge cases", async () => {
 test("core integration: error results stay structured", async () => {
   const fakeTask = await getTask({ task: "9999999999999999" })
   assert.equal(isError(fakeTask), true)
+})
+
+// ---------------------------------------------------------------------------
+// Tag integration tests
+// ---------------------------------------------------------------------------
+
+test("core integration: tag lifecycle — create, search, attach, detach", async () => {
+  requirePat()
+
+  const stamp = `auto-${Date.now()}`
+  const tagName = `test-tag-${stamp}`
+
+  // Create a temporary project + task to work with
+  const projectGid = await createRawProject(`Asana API Tag Test ${stamp}`)
+  const taskGid = await createRawTask({
+    name: `Tag lifecycle task ${stamp}`,
+    projectGids: [projectGid],
+  })
+
+  // 1. Create a new tag
+  const createdTag = await createTag({ name: tagName })
+  assert.equal(createdTag.ok, true, `createTag failed: ${JSON.stringify(createdTag)}`)
+  assert.equal(createdTag.tag.name, tagName)
+  const tagGid = createdTag.tag.gid
+  assert.ok(tagGid, "expected a tag GID")
+
+  // 2. Search for the tag by name — it should appear in workspace tags
+  const tagSearch = await getWorkspaceTags({ query: tagName })
+  assert.equal(tagSearch.ok, true, `getWorkspaceTags failed: ${JSON.stringify(tagSearch)}`)
+  // The Asana typeahead may return approximate matches; at minimum the list should be non-empty
+  assert.ok(tagSearch.tags.length > 0, "expected at least one tag result")
+
+  // 3. Attach the tag to the task
+  const addResult = await addTagToTask({ task: taskGid, tag: tagGid })
+  assert.equal(addResult.ok, true, `addTagToTask failed: ${JSON.stringify(addResult)}`)
+  assert.equal(addResult.task_gid, taskGid)
+  assert.equal(addResult.tag_gid, tagGid)
+
+  // Verify the tag now appears on the task via the raw API
+  const taskAfterAdd = await asanaRequest("GET", `/tasks/${taskGid}?opt_fields=tags.name,tags.gid`)
+  const attachedTags: Array<{ gid: string; name: string }> = taskAfterAdd.data?.tags ?? []
+  assert.ok(
+    attachedTags.some((t) => t.gid === tagGid),
+    `expected tag ${tagGid} to be on task after addTagToTask`,
+  )
+
+  // 4. Detach the tag from the task
+  const removeResult = await removeTagFromTask({ task: taskGid, tag: tagGid })
+  assert.equal(removeResult.ok, true, `removeTagFromTask failed: ${JSON.stringify(removeResult)}`)
+  assert.equal(removeResult.task_gid, taskGid)
+  assert.equal(removeResult.tag_gid, tagGid)
+
+  // Verify the tag is gone from the task
+  const taskAfterRemove = await asanaRequest("GET", `/tasks/${taskGid}?opt_fields=tags.name,tags.gid`)
+  const remainingTags: Array<{ gid: string; name: string }> = taskAfterRemove.data?.tags ?? []
+  assert.ok(
+    !remainingTags.some((t) => t.gid === tagGid),
+    `expected tag ${tagGid} to be removed from task after removeTagFromTask`,
+  )
+
+  // Cleanup: delete the tag via raw API (no delete tool exists; this is fine for test teardown)
+  await asanaRequest("DELETE", `/tags/${tagGid}`)
+})
+
+test("core integration: createTag with color stores color on the tag", async () => {
+  requirePat()
+
+  const stamp = `auto-${Date.now()}`
+  const tagName = `colored-tag-${stamp}`
+
+  const result = await createTag({ name: tagName, color: "dark-green" })
+  assert.equal(result.ok, true, `createTag with color failed: ${JSON.stringify(result)}`)
+  assert.equal(result.tag.name, tagName)
+
+  // Verify color via raw API
+  const raw = await asanaRequest("GET", `/tags/${result.tag.gid}?opt_fields=name,color`)
+  assert.equal(raw.data.color, "dark-green")
+
+  // Cleanup
+  await asanaRequest("DELETE", `/tags/${result.tag.gid}`)
+})
+
+test("core integration: getWorkspaceTags returns list without query", async () => {
+  requirePat()
+
+  const result = await getWorkspaceTags({})
+  assert.equal(result.ok, true, `getWorkspaceTags failed: ${JSON.stringify(result)}`)
+  // Every workspace should have at least some tags, but we only assert shape
+  assert.ok(Array.isArray(result.tags))
+  if (result.tags.length > 0) {
+    assert.ok(typeof result.tags[0].gid === "string")
+    assert.ok(typeof result.tags[0].name === "string")
+  }
 })

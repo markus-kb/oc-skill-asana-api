@@ -269,6 +269,9 @@ type TaskDependencyMutationResult = { ok: true; task_gid: string; dependency_gid
 type GetProjectStatusUpdatesResult = { ok: true; project_gid: string; status_updates: Array<{ gid: string; title: string; text: string; status_type: string; created_at: string; author: string | null }> }
 type CreateProjectStatusUpdateResult = { ok: true; status_update: { gid: string; title: string; status_type: string; created_at: string } }
 type CreateProjectResult = { ok: true; project: { gid: string; name: string; url: string }; sections_created: string[] }
+type GetWorkspaceTagsResult = { ok: true; tags: Array<{ gid: string; name: string }> }
+type CreateTagResult = { ok: true; tag: { gid: string; name: string } }
+type TagMutationResult = { ok: true; task_gid: string; tag_gid: string }
 
 export async function findProject(args: { name: string }): Promise<FindProjectResult | AsanaErrorShape> {
   try {
@@ -1050,6 +1053,84 @@ export async function createProject(args: {
       },
       sections_created: sectionsCreated,
     }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tag functions
+// ---------------------------------------------------------------------------
+// Tags in Asana are first-class objects with GIDs. A coding agent's typical
+// workflow is: search for an existing tag by name → create it if absent →
+// attach/detach it from a task. We expose all four operations as tools so the
+// agent can perform each step independently.
+
+export async function getWorkspaceTags(args: { query?: string }): Promise<GetWorkspaceTagsResult | AsanaErrorShape> {
+  try {
+    const wsGid = await getWorkspaceGid()
+    const params: Record<string, string> = { opt_fields: "name", limit: "100" }
+    // Asana's /workspaces/{gid}/tags endpoint does not support full-text search;
+    // the closest available filter is the typeahead endpoint. We use typeahead
+    // when a query is provided and fall back to listing all tags when it is not,
+    // so the caller always gets a consistent { ok, tags } shape.
+    if (hasText(args.query)) {
+      const res = await asanaGet(`/workspaces/${wsGid}/typeahead`, {
+        resource_type: "tag",
+        query: args.query.trim(),
+        count: "20",
+        opt_fields: "name",
+      })
+      if (isError(res)) return res
+      return {
+        ok: true,
+        tags: (res.data ?? []).map((tag: any) => ({ gid: tag.gid, name: tag.name })),
+      }
+    }
+
+    const tags = await asanaGetAll(`/workspaces/${wsGid}/tags`, params)
+    if (isError(tags)) return tags
+    return {
+      ok: true,
+      tags: tags.map((tag: any) => ({ gid: tag.gid, name: tag.name })),
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function createTag(args: { name: string; color?: string }): Promise<CreateTagResult | AsanaErrorShape> {
+  try {
+    const wsGid = await getWorkspaceGid()
+    const body: Record<string, any> = { name: args.name, workspace: wsGid }
+    if (hasText(args.color)) body.color = args.color.trim()
+
+    const res = await asanaPost("/tags", body)
+    if (isError(res)) return res
+    return {
+      ok: true,
+      tag: { gid: res.data.gid, name: res.data.name },
+    }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function addTagToTask(args: { task: string; tag: string }): Promise<TagMutationResult | AsanaErrorShape> {
+  try {
+    const res = await asanaPost(`/tasks/${args.task}/addTag`, { tag: args.tag })
+    if (isError(res)) return res
+    return { ok: true, task_gid: args.task, tag_gid: args.tag }
+  } catch (error: any) {
+    return formatCaughtError(error)
+  }
+}
+
+export async function removeTagFromTask(args: { task: string; tag: string }): Promise<TagMutationResult | AsanaErrorShape> {
+  try {
+    const res = await asanaPost(`/tasks/${args.task}/removeTag`, { tag: args.tag })
+    if (isError(res)) return res
+    return { ok: true, task_gid: args.task, tag_gid: args.tag }
   } catch (error: any) {
     return formatCaughtError(error)
   }
