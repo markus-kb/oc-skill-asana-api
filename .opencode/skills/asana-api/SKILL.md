@@ -54,6 +54,18 @@ You have access to custom Asana tools for managing project work. Use these tools
 | `asana_api_remove_tag_from_task` | Detach a tag from a task |
 | `asana_api_create_task_with_subtasks` | Create a parent task and one or more subtasks in a single call |
 
+## Choosing the Right Creation Tool
+
+Creating a task? Pick the right tool based on what you need:
+
+| Goal | Tool | Key field |
+|------|------|-----------|
+| Top-level task in a project | `asana_api_create_task` | `project` (required) |
+| Subtask under an existing task | `asana_api_create_subtask` | `parent` (required) |
+| Top-level task with known subtasks | `asana_api_create_task_with_subtasks` | `project` (required) |
+
+**Never** pass `parent` to `create_task` — it does not have that field. **Never** pass `project` to `create_subtask` — subtasks inherit project membership from their parent.
+
 ## Name Resolution Rules
 
 - **Always resolve names to GIDs before writes.** If the user says "Marketing Launch project", call `asana_api_find_project` first to get the GID.

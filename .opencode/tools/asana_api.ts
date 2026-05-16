@@ -124,7 +124,7 @@ export const get_project = tool({
 
 export const create_task = tool({
   description:
-    "Create a new task in an Asana project. Optionally place it in a specific section.",
+    "Create a top-level project task in Asana. Requires a project GID — do NOT use for subtasks. For subtasks, use create_subtask instead. Optionally place it in a specific section.",
   args: {
     project: tool.schema.string().describe("Project GID"),
     name: tool.schema.string().describe("Task name"),
@@ -214,7 +214,7 @@ export const update_task_custom_fields = tool({
 })
 
 export const create_subtask = tool({
-  description: "Create a subtask under an existing Asana task.",
+  description: "Create a subtask under an existing Asana task. Requires the GID of the parent task — do NOT use for top-level project tasks. For top-level tasks, use create_task.",
   args: {
     parent: tool.schema.string().describe("Parent task GID"),
     name: tool.schema.string().describe("Subtask name"),
@@ -533,7 +533,8 @@ export const remove_tag_from_task = tool({
 
 export const create_task_with_subtasks = tool({
   description:
-    "Create a task in an Asana project and immediately add one or more subtasks under it in a single call. " +
+    "Create a top-level project task in Asana and immediately add one or more subtasks under it in a single call. " +
+    "Requires a project GID — do NOT pass a parent GID. " +
     "Returns the created parent task and lists which subtasks succeeded or failed. " +
     "Use this instead of calling create_task + create_subtask separately when you know the subtasks upfront.",
   args: {
